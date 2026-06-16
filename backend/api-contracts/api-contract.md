@@ -273,3 +273,29 @@ GET /notes/{userId}
 - content
 - category
 - createdAt
+
+# Authentication
+
+This project uses Amazon Cognito with JWT authentication.
+
+Users authenticate through Cognito.
+
+After login, Cognito returns a JWT access token.
+
+The frontend includes this token in every protected request.
+
+Authorization: Bearer <JWT_TOKEN>
+
+API Gateway validates the JWT before invoking Lambda.
+
+Protected Routes
+
+GET /applications
+
+POST /applications
+
+PATCH /applications
+
+Public Routes
+
+OPTIONS /applications

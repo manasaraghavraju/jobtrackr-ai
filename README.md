@@ -41,3 +41,11 @@ JobTrackr AI is a full-stack job application tracking platform designed for job 
 ## Project Status
 
 In progress.
+
+## Authentication
+
+Authentication is implemented using Amazon Cognito.
+
+API Gateway validates JWT tokens before requests reach Lambda.
+
+This ensures only authenticated users can access protected resources.
