@@ -40,3 +40,43 @@ body {
 h1 {
   color: #111827;
 }
+
+.application-form {
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.application-form input,
+.application-form select,
+.application-form textarea {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.application-form button {
+  padding: 12px;
+  background-color: #1f2937;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.application-form button:disabled {
+  background-color: #777;
+  cursor: not-allowed;
+}
+
+.success-message {
+  color: green;
+  font-weight: bold;
+}
+
+.error-message {
+  color: red;
+  font-weight: bold;
+}
