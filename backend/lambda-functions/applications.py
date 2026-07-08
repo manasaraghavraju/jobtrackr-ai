@@ -1,8 +1,12 @@
 import json
 import uuid
 import boto3
+import logging
 from datetime import datetime
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table("Applications")
@@ -19,6 +23,11 @@ ALLOWED_STATUSES = [
 
 
 def response(status_code, body):
+    logger.info({
+        "statusCode": status_code,
+        "responseBody": body
+    })
+
     return {
         "statusCode": status_code,
         "headers": {
@@ -77,6 +86,13 @@ def create_application(event):
         "updatedAt": now
     }
 
+    logger.info({
+        "message": "Creating application",
+        "userId": application["userId"],
+        "applicationId": application["applicationId"],
+        "company": application["company"]
+    })
+
     table.put_item(Item=application)
 
     return response(201, {
@@ -92,6 +108,11 @@ def get_applications(event):
     if not user_id:
         return response(400, {"error": "userId query parameter is required"})
 
+    logger.info({
+        "message": "Fetching applications",
+        "userId": user_id
+    })
+    
     result = table.query(
         KeyConditionExpression="userId = :userId",
         ExpressionAttributeValues={
@@ -172,6 +193,12 @@ def update_application(event):
         })
 
     except ClientError as e:
+        logger.error({
+            "message": "DynamoDB update failed",
+            "errorCode": e.response["Error"]["Code"],
+            "errorMessage": e.response["Error"]["Message"]
+        })
+
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             return response(404, {
                 "error": "Application not found"
@@ -183,6 +210,13 @@ def update_application(event):
 
 
 def lambda_handler(event, context):
+
+    logger.info({
+        "message": "Received request",
+        "method": event.get("requestContext", {}).get("http", {}).get("method"),
+        "path": event.get("rawPath"),
+        "queryParams": event.get("queryStringParameters")
+    })
     try:
         method = event.get("requestContext", {}).get("http", {}).get("method")
 
@@ -204,5 +238,8 @@ def lambda_handler(event, context):
         return response(400, {"error": "Invalid JSON body"})
 
     except Exception as e:
-        print("Unexpected error:", str(e))
-        return response(500, {"error": "Internal server error"})
+        logger.exception("Unexpected server error")
+        return response(500, {
+            "error": "Internal server error",
+            "message": "Something went wrong while processing the request"
+        })
