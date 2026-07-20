@@ -2,8 +2,12 @@ import json
 import uuid
 import boto3
 import logging
+import base64
+from typing import Any
 from datetime import datetime
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+from cache_service import delete_cached_value
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -48,6 +52,46 @@ def parse_body(event):
         return event["body"]
 
     return json.loads(event["body"])
+
+def encode_next_token(last_evaluated_key: dict[str, Any] | None) -> str | None:
+    """
+    Convert DynamoDB LastEvaluatedKey into a URL-safe token.
+    """
+
+    if not last_evaluated_key:
+        return None
+
+    token_json = json.dumps(last_evaluated_key)
+
+    return base64.urlsafe_b64encode(
+        token_json.encode("utf-8")
+    ).decode("utf-8")
+
+
+def decode_next_token(next_token: str | None) -> dict[str, Any] | None:
+    """
+    Convert the API nextToken back into DynamoDB ExclusiveStartKey.
+    """
+
+    if not next_token:
+        return None
+
+    try:
+        decoded_bytes = base64.urlsafe_b64decode(
+            next_token.encode("utf-8")
+        )
+
+        decoded_value = json.loads(
+            decoded_bytes.decode("utf-8")
+        )
+
+        if not isinstance(decoded_value, dict):
+            raise ValueError("Decoded token is not an object")
+
+        return decoded_value
+
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ValueError("Invalid nextToken") from error
 
 
 def validate_create_application(body):
@@ -95,6 +139,10 @@ def create_application(event):
 
     table.put_item(Item=application)
 
+    delete_cached_value(
+        f"dashboard:metrics:{application['userId']}"
+    )
+
     return response(201, {
         "message": "Application created successfully",
         "application": application
@@ -103,26 +151,87 @@ def create_application(event):
 
 def get_applications(event):
     query_params = event.get("queryStringParameters") or {}
+
     user_id = query_params.get("userId")
+    limit_value = query_params.get("limit", "10")
+    sort_order = query_params.get("sortOrder", "desc").lower()
+    next_token = query_params.get("nextToken")
 
     if not user_id:
-        return response(400, {"error": "userId query parameter is required"})
+        return response(
+            400,
+            {"error": "userId query parameter is required"}
+        )
+
+    try:
+        limit = int(limit_value)
+    except ValueError:
+        return response(
+            400,
+            {"error": "limit must be an integer"}
+        )
+
+    if limit < 1 or limit > 50:
+        return response(
+            400,
+            {"error": "limit must be between 1 and 50"}
+        )
+
+    if sort_order not in {"asc", "desc"}:
+        return response(
+            400,
+            {"error": "sortOrder must be asc or desc"}
+        )
+
+    try:
+        exclusive_start_key = decode_next_token(next_token)
+    except ValueError:
+        return response(
+            400,
+            {"error": "Invalid nextToken"}
+        )
+
+    query_arguments = {
+        "KeyConditionExpression": Key("userId").eq(user_id),
+        "Limit": limit,
+        "ScanIndexForward": sort_order == "asc",
+    }
+
+    if exclusive_start_key:
+        query_arguments["ExclusiveStartKey"] = exclusive_start_key
 
     logger.info({
-        "message": "Fetching applications",
-        "userId": user_id
+        "message": "Fetching paginated applications",
+        "userId": user_id,
+        "limit": limit,
+        "sortOrder": sort_order,
+        "hasNextToken": next_token is not None,
     })
-    
-    result = table.query(
-        KeyConditionExpression="userId = :userId",
-        ExpressionAttributeValues={
-            ":userId": user_id
-        }
+
+    result = table.query(**query_arguments)
+
+    applications = result.get("Items", [])
+
+    encoded_next_token = encode_next_token(
+        result.get("LastEvaluatedKey")
     )
 
-    return response(200, {
-        "applications": result.get("Items", [])
-    })
+    return response(
+        200,
+        {
+            "applications": applications,
+            "pagination": {
+                "limit": limit,
+                "returnedCount": len(applications),
+                "nextToken": encoded_next_token,
+                "hasMore": encoded_next_token is not None,
+            },
+            "sorting": {
+                "sortBy": "applicationId",
+                "sortOrder": sort_order,
+            },
+        }
+    )
 
 
 def update_application(event):
@@ -185,6 +294,10 @@ def update_application(event):
             ExpressionAttributeValues=expression_attribute_values,
             ReturnValues="ALL_NEW",
             ConditionExpression="attribute_exists(applicationId)"
+        )
+
+        delete_cached_value(
+            f"dashboard:metrics:{user_id}"
         )
 
         return response(200, {

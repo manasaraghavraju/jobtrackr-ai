@@ -80,6 +80,26 @@ def test_get_applications_success(mock_query):
         ]
     }
 
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "limit": "10",
+            "sortOrder": "desc"
+        }
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 200
+    assert len(body["applications"]) == 1
+    assert body["pagination"]["returnedCount"] == 1
+    assert body["pagination"]["hasMore"] is False
+    assert body["sorting"]["sortOrder"] == "desc"
+
+    mock_query.assert_called_once()
+
     event = make_event("GET", query_params={"userId": "user_123"})
 
     response = applications.lambda_handler(event, None)
@@ -88,6 +108,69 @@ def test_get_applications_success(mock_query):
     assert response["statusCode"] == 200
     assert len(body["applications"]) == 1
     assert body["applications"][0]["company"] == "Amazon"
+
+def test_get_applications_invalid_limit():
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "limit": "abc"
+        }
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 400
+    assert body["error"] == "limit must be an integer"
+
+
+def test_get_applications_limit_too_large():
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "limit": "100"
+        }
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 400
+    assert body["error"] == "limit must be between 1 and 50"
+
+
+def test_get_applications_invalid_sort_order():
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "sortOrder": "random"
+        }
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 400
+    assert body["error"] == "sortOrder must be asc or desc"
+
+
+def test_get_applications_invalid_next_token():
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "nextToken": "not-a-valid-token"
+        }
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 400
+    assert body["error"] == "Invalid nextToken"
 
 
 def test_get_applications_missing_user_id():

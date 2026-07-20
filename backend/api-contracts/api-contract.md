@@ -133,6 +133,39 @@ POST /applications
 
 GET /applications/{userId}
 
+### Pagination and Sorting
+
+```http
+GET /applications?userId=user_123&limit=10&sortOrder=desc
+```
+
+Query parameters:
+
+| Parameter | Required | Default | Description |
+|---|---:|---:|---|
+| userId | Yes | — | User whose applications are requested |
+| limit | No | 10 | Number of records per page; allowed range is 1–50 |
+| sortOrder | No | desc | Sort direction: `asc` or `desc` |
+| nextToken | No | — | Token returned by the previous page |
+
+Example response:
+
+```json
+{
+  "applications": [],
+  "pagination": {
+    "limit": 10,
+    "returnedCount": 0,
+    "nextToken": null,
+    "hasMore": false
+  },
+  "sorting": {
+    "sortBy": "applicationId",
+    "sortOrder": "desc"
+  }
+}
+```
+
 ### Response
 
 ```json
