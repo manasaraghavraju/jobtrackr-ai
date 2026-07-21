@@ -5,7 +5,7 @@ import logging
 import base64
 from typing import Any
 from datetime import datetime
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 from cache_service import delete_cached_value
 
@@ -94,6 +94,77 @@ def decode_next_token(next_token: str | None) -> dict[str, Any] | None:
         raise ValueError("Invalid nextToken") from error
 
 
+def validate_iso_date(date_value: str, field_name: str) -> str | None:
+    """
+    Validate dates in YYYY-MM-DD format.
+    Returns an error message when invalid, otherwise None.
+    """
+
+    try:
+        datetime.strptime(date_value, "%Y-%m-%d")
+        return None
+    except ValueError:
+        return f"{field_name} must use YYYY-MM-DD format"
+
+def build_application_filter(
+    company: str | None,
+    status: str | None,
+    role: str | None,
+    search: str | None,
+    date_from: str | None,
+    date_to: str | None,
+):
+    """
+    Build one DynamoDB FilterExpression from optional filters.
+    """
+
+    filter_expression = None
+
+    def add_condition(condition):
+        nonlocal filter_expression
+
+        if filter_expression is None:
+            filter_expression = condition
+        else:
+            filter_expression = filter_expression & condition
+
+    if company:
+        add_condition(
+            Attr("companyLower").contains(company.strip().lower())
+        )
+
+    if role:
+        add_condition(
+            Attr("roleLower").contains(role.strip().lower())
+        )
+
+    if status:
+        add_condition(
+            Attr("status").eq(status)
+        )
+
+    if search:
+        normalized_search = search.strip().lower()
+
+        search_condition = (
+            Attr("companyLower").contains(normalized_search)
+            | Attr("roleLower").contains(normalized_search)
+        )
+
+        add_condition(search_condition)
+
+    if date_from:
+        add_condition(
+            Attr("appliedDate").gte(date_from)
+        )
+
+    if date_to:
+        add_condition(
+            Attr("appliedDate").lte(date_to)
+        )
+
+    return filter_expression
+
 def validate_create_application(body):
     required_fields = ["userId", "company", "role", "status"]
 
@@ -120,14 +191,16 @@ def create_application(event):
     application = {
         "userId": body["userId"],
         "applicationId": str(uuid.uuid4()),
-        "company": body["company"],
-        "role": body["role"],
+        "company": body["company"].strip(),
+        "companyLower": body["company"].strip().lower(),
+        "role": body["role"].strip(),
+        "roleLower": body["role"].strip().lower(),
         "status": body["status"],
         "appliedDate": body.get("appliedDate"),
         "jobLink": body.get("jobLink"),
         "notes": body.get("notes"),
         "createdAt": now,
-        "updatedAt": now
+        "updatedAt": now,
     }
 
     logger.info({
@@ -157,39 +230,104 @@ def get_applications(event):
     sort_order = query_params.get("sortOrder", "desc").lower()
     next_token = query_params.get("nextToken")
 
+    company = query_params.get("company")
+    status = query_params.get("status")
+    role = query_params.get("role")
+    search = query_params.get("search")
+    date_from = query_params.get("dateFrom")
+    date_to = query_params.get("dateTo")
+
+    # -----------------------------
+    # Validate userId
+    # -----------------------------
+
     if not user_id:
-        return response(
-            400,
-            {"error": "userId query parameter is required"}
-        )
+        return response(400, {
+            "error": "userId query parameter is required"
+        })
+
+    # -----------------------------
+    # Validate limit
+    # -----------------------------
 
     try:
         limit = int(limit_value)
     except ValueError:
-        return response(
-            400,
-            {"error": "limit must be an integer"}
-        )
+        return response(400, {
+            "error": "limit must be an integer"
+        })
 
     if limit < 1 or limit > 50:
-        return response(
-            400,
-            {"error": "limit must be between 1 and 50"}
-        )
+        return response(400, {
+            "error": "limit must be between 1 and 50"
+        })
+
+    # -----------------------------
+    # Validate sorting
+    # -----------------------------
 
     if sort_order not in {"asc", "desc"}:
-        return response(
-            400,
-            {"error": "sortOrder must be asc or desc"}
-        )
+        return response(400, {
+            "error": "sortOrder must be asc or desc"
+        })
+
+    # -----------------------------
+    # Validate status
+    # -----------------------------
+
+    if status and status not in ALLOWED_STATUSES:
+        return response(400, {
+            "error": "Invalid status value"
+        })
+
+    # -----------------------------
+    # Validate dates
+    # -----------------------------
+
+    if date_from:
+        date_error = validate_iso_date(date_from, "dateFrom")
+
+        if date_error:
+            return response(400, {
+                "error": date_error
+            })
+
+    if date_to:
+        date_error = validate_iso_date(date_to, "dateTo")
+
+        if date_error:
+            return response(400, {
+                "error": date_error
+            })
+
+    if date_from and date_to and date_from > date_to:
+        return response(400, {
+            "error": "dateFrom cannot be later than dateTo"
+        })
+
+    # -----------------------------
+    # Decode pagination token
+    # -----------------------------
 
     try:
         exclusive_start_key = decode_next_token(next_token)
     except ValueError:
-        return response(
-            400,
-            {"error": "Invalid nextToken"}
-        )
+        return response(400, {
+            "error": "Invalid nextToken"
+        })
+
+    # -----------------------------
+    # Build DynamoDB filters
+    # -----------------------------
+
+    filter_expression = build_application_filter(
+        company=company,
+        status=status,
+        role=role,
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
     query_arguments = {
         "KeyConditionExpression": Key("userId").eq(user_id),
@@ -200,11 +338,20 @@ def get_applications(event):
     if exclusive_start_key:
         query_arguments["ExclusiveStartKey"] = exclusive_start_key
 
+    if filter_expression is not None:
+        query_arguments["FilterExpression"] = filter_expression
+
     logger.info({
-        "message": "Fetching paginated applications",
+        "message": "Searching and filtering applications",
         "userId": user_id,
         "limit": limit,
         "sortOrder": sort_order,
+        "company": company,
+        "status": status,
+        "role": role,
+        "search": search,
+        "dateFrom": date_from,
+        "dateTo": date_to,
         "hasNextToken": next_token is not None,
     })
 
@@ -216,22 +363,35 @@ def get_applications(event):
         result.get("LastEvaluatedKey")
     )
 
-    return response(
-        200,
-        {
-            "applications": applications,
-            "pagination": {
-                "limit": limit,
-                "returnedCount": len(applications),
-                "nextToken": encoded_next_token,
-                "hasMore": encoded_next_token is not None,
-            },
-            "sorting": {
-                "sortBy": "applicationId",
-                "sortOrder": sort_order,
-            },
-        }
-    )
+    active_filters = {
+        "company": company,
+        "status": status,
+        "role": role,
+        "search": search,
+        "dateFrom": date_from,
+        "dateTo": date_to,
+    }
+
+    active_filters = {
+        key: value
+        for key, value in active_filters.items()
+        if value is not None and value != ""
+    }
+
+    return response(200, {
+        "applications": applications,
+        "pagination": {
+            "limit": limit,
+            "returnedCount": len(applications),
+            "nextToken": encoded_next_token,
+            "hasMore": encoded_next_token is not None,
+        },
+        "sorting": {
+            "sortBy": "applicationId",
+            "sortOrder": sort_order,
+        },
+        "filters": active_filters,
+    })
 
 
 def update_application(event):
@@ -259,6 +419,28 @@ def update_application(event):
     for field in allowed_update_fields:
         if field in body:
             update_fields[field] = body[field]
+
+    if "company" in update_fields:
+        company = update_fields["company"].strip()
+
+        if not company:
+            return response(400, {
+                "error": "company cannot be empty"
+            })
+
+        update_fields["company"] = company
+        update_fields["companyLower"] = company.lower()
+
+    if "role" in update_fields:
+        role = update_fields["role"].strip()
+
+        if not role:
+            return response(400, {
+                "error": "role cannot be empty"
+            })
+
+        update_fields["role"] = role
+        update_fields["roleLower"] = role.lower()
 
     if not update_fields:
         return response(400, {

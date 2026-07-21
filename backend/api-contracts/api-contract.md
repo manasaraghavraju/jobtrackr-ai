@@ -332,3 +332,53 @@ PATCH /applications
 Public Routes
 
 OPTIONS /applications
+
+### Search and Filtering
+
+```http
+GET /applications
+```
+
+Supported query parameters:
+
+| Parameter | Required | Description |
+|---|---:|---|
+| `userId` | Yes | User whose applications are requested |
+| `company` | No | Partial, case-insensitive company match |
+| `role` | No | Partial, case-insensitive role match |
+| `status` | No | Exact application-status match |
+| `search` | No | Searches both company and role |
+| `dateFrom` | No | Applications on or after `YYYY-MM-DD` |
+| `dateTo` | No | Applications on or before `YYYY-MM-DD` |
+| `limit` | No | Page size from 1–50 |
+| `sortOrder` | No | `asc` or `desc` |
+| `nextToken` | No | Cursor returned by the previous page |
+
+Example:
+
+```http
+GET /applications?userId=user_123&company=amazon&status=Interview&dateFrom=2026-01-01
+```
+
+Example response:
+
+```json
+{
+  "applications": [],
+  "pagination": {
+    "limit": 10,
+    "returnedCount": 0,
+    "nextToken": null,
+    "hasMore": false
+  },
+  "sorting": {
+    "sortBy": "applicationId",
+    "sortOrder": "desc"
+  },
+  "filters": {
+    "company": "amazon",
+    "status": "Interview",
+    "dateFrom": "2026-01-01"
+  }
+}
+```

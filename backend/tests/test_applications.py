@@ -109,6 +109,96 @@ def test_get_applications_success(mock_query):
     assert len(body["applications"]) == 1
     assert body["applications"][0]["company"] == "Amazon"
 
+@patch("applications.table.query")
+def test_get_applications_with_filters(mock_query):
+    mock_query.return_value = {
+        "Items": [
+            {
+                "userId": "user_123",
+                "applicationId": "app_123",
+                "company": "Amazon",
+                "companyLower": "amazon",
+                "role": "Software Engineer",
+                "roleLower": "software engineer",
+                "status": "Interview",
+                "appliedDate": "2026-07-01",
+            }
+        ]
+    }
+
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "company": "amazon",
+            "status": "Interview",
+            "role": "engineer",
+            "dateFrom": "2026-01-01",
+            "dateTo": "2026-12-31",
+            "limit": "10",
+            "sortOrder": "desc",
+        },
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 200
+    assert len(body["applications"]) == 1
+    assert body["filters"]["company"] == "amazon"
+    assert body["filters"]["status"] == "Interview"
+    assert body["filters"]["role"] == "engineer"
+
+    mock_query.assert_called_once()
+
+def test_get_applications_invalid_filter_status():
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "status": "Unknown",
+        },
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 400
+    assert body["error"] == "Invalid status value"
+
+
+def test_get_applications_invalid_date_from():
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "dateFrom": "07-01-2026",
+        },
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 400
+    assert body["error"] == "dateFrom must use YYYY-MM-DD format"
+
+
+def test_get_applications_invalid_date_range():
+    event = make_event(
+        "GET",
+        query_params={
+            "userId": "user_123",
+            "dateFrom": "2026-12-31",
+            "dateTo": "2026-01-01",
+        },
+    )
+
+    result = applications.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 400
+    assert body["error"] == "dateFrom cannot be later than dateTo"
+
 def test_get_applications_invalid_limit():
     event = make_event(
         "GET",
