@@ -106,3 +106,29 @@ h1 {
   margin-top: 8px;
   font-weight: 600;
 }
+
+.resume-upload {
+  max-width: 500px;
+  margin-bottom: 32px;
+  padding: 20px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.resume-upload input {
+  display: block;
+  margin: 16px 0;
+}
+
+.resume-upload button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.resume-upload button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}

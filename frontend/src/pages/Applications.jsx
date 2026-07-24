@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ResumeUpload from "../components/ResumeUpload";
 
 function Applications() {
   const [formData, setFormData] = useState({
@@ -137,6 +138,7 @@ function Applications() {
           {loading ? "Submitting..." : "Add Application"}
         </button>
       </form>
+      <ResumeUpload />
     </div>
   );
 }
